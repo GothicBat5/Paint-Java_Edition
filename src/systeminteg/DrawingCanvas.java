@@ -1,5 +1,6 @@
 package systeminteg;
 
+import javafx.animation.AnimationTimer;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Cursor;
 import javafx.scene.SnapshotParameters;
@@ -35,11 +36,21 @@ public class DrawingCanvas extends StackPane {
     private double size = 8, flow = 1;
     private double startX, startY, lastX, lastY;
     private double minX, minY, maxX, maxY;
-    private boolean drawing;
+    private boolean drawing, moved;
     private BiConsumer<Integer, Integer> onCursor;
 
-    public DrawingCanvas(int w, int h) 
-    {
+    // keeps depositing paint at the pointer while it is held still (spray)
+    private final AnimationTimer buildup = new AnimationTimer() {
+        @Override
+        public void handle(long now) 
+        {
+            if (!drawing) return;
+            if (moved) moved = false;
+            else paintSegment(lastX, lastY);
+        }
+    };
+
+    public DrawingCanvas(int w, int h) {
         getChildren().addAll(base, stroke);
         getStyleClass().add("paper");
         setMaxSize(USE_PREF_SIZE, USE_PREF_SIZE);
@@ -65,7 +76,7 @@ public class DrawingCanvas extends StackPane {
     }
 
     public void useFill() 
-    { 
+    {
     	mode = Mode.FILL; 
     }
 
@@ -74,7 +85,7 @@ public class DrawingCanvas extends StackPane {
     	fg = c; 
     }
 
-    public void setBgColor(Color c) 
+    public void setBgColor(Color c)
     { 
     	bg = c; 
     }
@@ -104,7 +115,7 @@ public class DrawingCanvas extends StackPane {
         if (e.getButton() != MouseButton.PRIMARY && e.getButton() != MouseButton.SECONDARY) return;
         active = e.getButton() == MouseButton.SECONDARY ? bg : fg;
 
-        if (mode == Mode.FILL) 
+        if (mode == Mode.FILL)
         {
             pushHistory();
             FloodFill.fill(base, (int) e.getX(), (int) e.getY(), active);
@@ -117,15 +128,20 @@ public class DrawingCanvas extends StackPane {
         minX = minY = Double.MAX_VALUE;
         maxX = maxY = -Double.MAX_VALUE;
         stroke.setOpacity(flow);
-        if (mode == Mode.BRUSH) paintSegment(startX, startY);
+        if (mode == Mode.BRUSH) {
+            paintSegment(startX, startY);
+            if (brush.buildsUp()) buildup.start();
+        }
     }
 
-    private void dragged(MouseEvent e) 
+    private void dragged(MouseEvent e)
     {
         if (!drawing) return;
         report(e);
 
-        if (mode == Mode.BRUSH) {
+        if (mode == Mode.BRUSH) 
+        {
+            moved = true;
             paintSegment(e.getX(), e.getY());
             return;
         }
@@ -140,6 +156,7 @@ public class DrawingCanvas extends StackPane {
     {
         if (!drawing) return;
         drawing = false;
+        buildup.stop();
         stroke.setOpacity(1);
 
         Rectangle2D r = dirty();
@@ -158,8 +175,7 @@ public class DrawingCanvas extends StackPane {
         clear(r);
     }
 
-    private void paintSegment(double x, double y) 
-    {
+    private void paintSegment(double x, double y) {
         Color c = brush.isEraser() ? Color.WHITE : active;
         brush.stroke(stroke.getGraphicsContext2D(), lastX, lastY, x, y, c, size);
         touch(lastX, lastY);
@@ -180,7 +196,8 @@ public class DrawingCanvas extends StackPane {
     private Rectangle2D dirty() 
     {
         if (minX > maxX) return null;
-        double pad = size * 2 + 4;
+        
+        double pad = (mode == Mode.BRUSH ? brush.reach(size) : size * 2) + 4;
         double x = Math.max(0, Math.floor(minX - pad));
         double y = Math.max(0, Math.floor(minY - pad));
         double r = Math.min(stroke.getWidth(), Math.ceil(maxX + pad));
@@ -190,10 +207,7 @@ public class DrawingCanvas extends StackPane {
 
     private void clear(Rectangle2D r) 
     {
-        if (r != null) 
-        {
-        	stroke.getGraphicsContext2D().clearRect(r.getMinX(), r.getMinY(), r.getWidth(), r.getHeight());
-        }
+        if (r != null) stroke.getGraphicsContext2D().clearRect(r.getMinX(), r.getMinY(), r.getWidth(), r.getHeight());
     }
 
     private WritableImage grab() 
@@ -201,8 +215,7 @@ public class DrawingCanvas extends StackPane {
     	return base.snapshot(null, null); 
     }
 
-    private void pushHistory() 
-    {
+    private void pushHistory() {
         undo.addLast(grab());
         if (undo.size() > MAX_HISTORY) undo.removeFirst();
         redo.clear();
@@ -231,8 +244,7 @@ public class DrawingCanvas extends StackPane {
         base.getGraphicsContext2D().drawImage(from.removeLast(), 0, 0);
     }
 
-    private void allocate(int w, int h) 
-    {
+    private void allocate(int w, int h) {
         base.setWidth(w);
         base.setHeight(h);
         stroke.setWidth(w);
@@ -261,14 +273,12 @@ public class DrawingCanvas extends StackPane {
     public void resizeCanvas(int w, int h) 
     {
         WritableImage old = grab();
-        
         allocate(w, h);
         base.getGraphicsContext2D().drawImage(old, 0, 0);
         resetHistory();
     }
 
-    public void load(Image img) 
-    {
+    public void load(Image img) {
         allocate((int) img.getWidth(), (int) img.getHeight());
         base.getGraphicsContext2D().drawImage(img, 0, 0);
         resetHistory();
