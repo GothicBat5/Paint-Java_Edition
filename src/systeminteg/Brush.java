@@ -10,7 +10,8 @@ public abstract class Brush {
     private final String name;
     private final String icon;
 
-    protected Brush(String name, String icon) {
+    protected Brush(String name, String icon) 
+    {
         this.name = name;
         this.icon = icon;
     }
@@ -20,7 +21,7 @@ public abstract class Brush {
     	return name; 
     }
 
-    public String icon() 
+    public String icon()
     { 
     	return icon; 
     }
@@ -28,6 +29,18 @@ public abstract class Brush {
     public boolean isEraser() 
     { 
     	return false; 
+    }
+
+    // true if holding the pointer still should keep depositing paint (spray)
+    public boolean buildsUp() 
+    { 
+    	return false; 
+    }
+
+    // how far from the pointer this brush can draw; keeps the dirty rectangle tight
+    public double reach(double size) 
+    { 
+    	return size * 2; 
     }
 
     public abstract void stroke(GraphicsContext g, double x1, double y1, double x2, double y2, Color color, double size);
